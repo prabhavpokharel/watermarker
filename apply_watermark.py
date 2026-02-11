@@ -1,116 +1,118 @@
 import os
-from PIL import Image
-import glob
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-def apply_watermark(image_path, watermark_path, output_path, scale_factor=0.15, padding=10):
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
+
+def get_fitted_font(draw, text, max_width, initial_font_size):
     """
-    Apply watermark to an image and save it
+    Decreases font size until the text fits within max_width.
+    """
+    current_size = initial_font_size
+    font = ImageFont.truetype("Inter-Bold.ttf", current_size)
     
-    Args:
-        image_path: Path to the source image
-        watermark_path: Path to the watermark image (must be PNG with transparency)
-        output_path: Path where the watermarked image will be saved
-        scale_factor: Size of watermark relative to the main image (default: 0.15)
-        padding: Padding from the bottom-right corner in pixels (default: 10)
-    """
-    # Open the main image
+    # Calculate width of text
+    text_width = draw.textbbox((0, 0), text, font=font)[2]
+    
+    while text_width > max_width and current_size > 10:
+        current_size -= 2
+        font = ImageFont.truetype("Inter-Bold.ttf", current_size)
+        text_width = draw.textbbox((0, 0), text, font=font)[2]
+        
+    return font, current_size
+
+def apply_watermark(image_path, watermark_path, output_path, session_name, scale_factor=0.15):
     with Image.open(image_path) as base_image:
-        # Convert image to RGBA for processing
+        base_image = ImageOps.exif_transpose(base_image)
         if base_image.mode != 'RGBA':
             base_image = base_image.convert('RGBA')
         
-        # Open and resize watermark
-        with Image.open(watermark_path) as watermark:
-            # Calculate new size for watermark based on the main image size
-            watermark_width = int(base_image.width * scale_factor)
-            watermark_height = int(watermark_width * watermark.height / watermark.width)
-            
-            # Resize watermark maintaining aspect ratio
-            watermark = watermark.resize((watermark_width, watermark_height), Image.Resampling.LANCZOS)
-            
-            # Calculate position (bottom-right with padding)
-            position = (
-                base_image.width - watermark_width - padding,
-                base_image.height - watermark_height - 200
-            )
-            
-            # Create a new transparent layer for the watermark
-            transparent = Image.new('RGBA', base_image.size, (0, 0, 0, 0))
-            transparent.paste(watermark, position, watermark)
-            
-            # Combine the images
-            output_image = Image.alpha_composite(base_image, transparent)
-            
-            # Convert back to RGB if saving as JPEG
-            output_extension = os.path.splitext(output_path)[1].lower()
-            if output_extension in ['.jpg', '.jpeg']:
-                # Create white background and paste RGBA image on top
-                final_image = Image.new('RGB', output_image.size, (255, 255, 255))
-                final_image.paste(output_image, mask=output_image.split()[3])  # Use alpha channel as mask
-            else:
-                final_image = output_image
-            
-            # Create output directory if it doesn't exist
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-            # Save the image
-            final_image.save(output_path, quality=95)
+        width, height = base_image.size
+        is_portrait = height > width
+        
+        # 1. THE GRADIENT
+        gradient_height = int(height * 0.45)
+        gradient = Image.new('L', (1, gradient_height), color=0)
+        for y in range(gradient_height):
+            progress = y / gradient_height
+            alpha = int(230 * (progress ** 1.2)) 
+            gradient.putpixel((0, y), alpha)
+        
+        gradient = gradient.resize((width, gradient_height))
+        black_layer = Image.new('RGBA', (width, gradient_height), (0, 0, 0, 0))
+        black_layer.putalpha(gradient)
+        
+        overlay = Image.new('RGBA', base_image.size, (0, 0, 0, 0))
+        overlay.paste(black_layer, (0, height - gradient_height))
+        
+        # 2. DIMENSIONS & TEXT SCALING
+        padding = int(min(width, height) * 0.05)
+        # We start with a smaller base size as requested (3.5% of shorter side)
+        initial_font_size = int(min(width, height) * 0.035)
+        
+        draw = ImageDraw.Draw(overlay)
+        
+        # Determine maximum available width for text (leave room for logo)
+        # We give text roughly 60% of the width to prevent overlap
+        max_text_width = width * 0.6
+        
+        try:
+            font, final_font_size = get_fitted_font(draw, session_name, max_text_width, initial_font_size)
+        except:
+            font = ImageFont.load_default()
+            final_font_size = 15
 
-def process_images(input_folder, output_folder, watermark_path, scale_factor=0.15, padding=10):
-    """
-    Process all images in input folder and its subfolders
+        # 3. "NATURAL" TEXT (Off-white with 85% opacity)
+        # fill=(R, G, B, Alpha) -> (235, 235, 235, 215)
+        text_color = (235, 235, 235, 215)
+        draw.text((padding, height - final_font_size - padding), session_name, font=font, fill=text_color)
+
+        # 4. LOGO
+        with Image.open(watermark_path) as wm:
+            wm_scale = scale_factor * 0.6 if is_portrait else scale_factor
+            wm_w = int(width * wm_scale)
+            wm_h = int(wm_w * wm.height / wm.width)
+            wm_resized = wm.resize((wm_w, wm_h), Image.Resampling.LANCZOS)
+            overlay.paste(wm_resized, (width - wm_w - padding, height - wm_h - padding), wm_resized)
+
+        # 5. SAVE
+        final_output = os.path.splitext(output_path)[0] + ".jpg"
+        os.makedirs(os.path.dirname(final_output), exist_ok=True)
+        final = Image.new('RGB', output_image.size, (255, 255, 255)) if 'output_image' in locals() else Image.new('RGB', base_image.size)
+        
+        output_image = Image.alpha_composite(base_image, overlay)
+        final = Image.new('RGB', output_image.size, (255, 255, 255))
+        final.paste(output_image, mask=output_image.split()[3])
+        final.save(final_output, "JPEG", quality=95, subsampling=0)
+
+def process_images(input_folder, output_folder, watermark_path, session_name):
+    valid_extensions = ('.jpg', '.jpeg', '.png', '.heic', '.heif')
     
-    Args:
-        input_folder: Root folder containing images to process
-        output_folder: Root folder where processed images will be saved
-        watermark_path: Path to the watermark image
-        scale_factor: Size of watermark relative to the main image
-        padding: Padding from the bottom-right corner in pixels
-    """
-    # Supported image formats (case-insensitive)
-    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff', 
-                       '*.JPG', '*.JPEG', '*.PNG', '*.BMP', '*.TIFF']
-    
-    # Get all image files recursively
-    processed_files = set()  # To avoid processing duplicates due to case variations
-    
-    for extension in image_extensions:
-        pattern = os.path.join(input_folder, '**', extension)
-        for image_path in glob.glob(pattern, recursive=True):
-            # Skip if we've already processed this file (case-insensitive check)
-            if image_path.lower() in processed_files:
-                continue
+    # Use os.walk for better reliability over glob
+    count = 0
+    for root, dirs, files in os.walk(input_folder):
+        for file in files:
+            if file.lower().endswith(valid_extensions):
+                image_path = os.path.join(root, file)
+                rel_path = os.path.relpath(image_path, input_folder)
+                output_path = os.path.join(output_folder, rel_path)
                 
-            processed_files.add(image_path.lower())
-            
-            # Calculate relative path to maintain folder structure
-            rel_path = os.path.relpath(image_path, input_folder)
-            output_path = os.path.join(output_folder, rel_path)
-            
-            try:
-                apply_watermark(
-                    image_path=image_path,
-                    watermark_path=watermark_path,
-                    output_path=output_path,
-                    scale_factor=scale_factor,
-                    padding=padding
-                )
-                print(f"Processed: {rel_path}")
-            except Exception as e:
-                print(f"Error processing {rel_path}: {str(e)}")
-
-# Example usage
-if __name__ == "__main__":
-    input_folder = "input"
-    output_folder = "output"
-    watermark_path = "watermark.png"  # Your watermark image (must be PNG with transparency)
-    scale_factor = 0.18  # Watermark size relative to main image
-    padding = 300  # Pixels from bottom-right corner
+                try:
+                    apply_watermark(image_path, watermark_path, output_path, session_name)
+                    print(f"✅ Processed: {file}")
+                    count += 1
+                except Exception as e:
+                    print(f"❌ Error {file}: {e}")
     
+    print(f"\nFinished! Total images processed: {count}")
+
+if __name__ == "__main__":
     process_images(
-        input_folder=input_folder,
-        output_folder=output_folder,
-        watermark_path=watermark_path,
-        scale_factor=scale_factor,
-        padding=padding
+        input_folder="input", 
+        output_folder="output",
+        watermark_path="watermark.png",
+        session_name="Session on Game Development"
     )
