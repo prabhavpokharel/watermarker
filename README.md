@@ -1,51 +1,66 @@
-# Watermark Application
+# Watermarker & Branding Tool
 
-This project is a Python script that recursively processes all images in the `input` folder, adds a watermark to the bottom-center of each image, and saves the watermarked images in the `output` folder while maintaining the original directory structure.
+A Python-based image processor designed to apply professional branding to photography. It recursively processes images to add a dark aesthetic gradient, session typography with auto-fitting logic, and a logo watermark.
+
+## Features
+
+- **HEIF/HEIC Support**: Processes modern iPhone photos automatically
+- **Aesthetic Gradient**: Adds a soft black "pitch" gradient at the bottom for text legibility
+- **Dynamic Typography**: Adds a Session Name in Inter-Bold with "Auto-Shrink" logic to prevent text from overlapping the logo
+- **Orientation Aware**: Automatically scales the logo and text differently for Portrait vs. Landscape photos
+- **Structure Preserving**: Maintains your subfolder hierarchy from `input` to `output`
 
 ## Requirements
 
 - Python 3.10 or higher
-- Pillow library
+- Pillow (Image processing)
+- pillow-heif (For iPhone photo support)
+- Inter-Bold.ttf (Included in the root directory)
 
 ## Installation
 
-1. Clone the repository:
-    ```sh
-    git clone git@github.com:computerclubkec/watermarker.git
-    cd watermark
-    ```
+1. **Clone the repository:**
 
-2. Create a virtual environment and activate it:
-    ```sh
-    python -m venv venv
-    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-    ```
+```bash
+git clone git@github.com:computerclubkec/watermarker.git
+cd watermarker
+```
 
-3. Install the required dependencies:
-    ```sh
-    pip install -r requirements.txt
-    ```
+2. **Setup Virtual Environment:**
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. **Install Dependencies:**
+
+```bash
+pip install -r requirements.txt
+```
 
 ## Usage
 
-1. Place the images you want to process in the [input](input/) folder.
-2. Place or replace your watermark image (must be PNG with transparency) in the project root directory and name it [watermark.png](watermark.png).
-3. Run the script:
-    ```sh
-    python apply_watermark.py
-    ```
+1. **Prepare Assets:**
+   - Place images in the `/input` folder
+   - Ensure `watermark.png` (transparent PNG) is in the root
+   - Ensure `Inter-Bold.ttf` is in the root
 
-The script will process all images in the [input](input/) folder and its subfolders, add the watermark to the bottom-center of each image, and save the watermarked images in the [output](output/) folder, preserving the original directory structure.
+2. **Set Session Name:**
+   - Open `apply_watermark.py` and change the `session_name` in the `if __name__ == "__main__":` block
+
+3. **Run:**
+
+```bash
+python apply_watermark.py
+```
 
 ## Configuration
 
-You can configure the watermark size and padding by modifying the following variables in the [apply_watermark.py](http://_vscodecontentref_/5) script:
+The script uses smart defaults, but you can tweak these in `apply_watermark.py`:
 
-- [scale_factor](apply_watermark.py): Size of the watermark relative to the main image (default: `0.18`)
-- [padding](apply_watermark.py): Padding from the bottom-center in pixels (default: `300`)
-
-## Example
-
-```sh
-python apply_watermark.py
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `scale_factor` | Size of logo relative to image width | `0.15` |
+| `padding_percent` | Spacing from edges based on image size | `0.05` (5%) |
+| `text_color` | RGBA value for the typography | `(235, 235, 235, 215)` |
